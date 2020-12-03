@@ -3,7 +3,6 @@ import asyncio
 import functools as ft
 import time
 
-
 # Dictionary of valid verbs with their valid objects
 verbDict = {
     'e': ['e', 'l', 'r', 's'],
@@ -24,7 +23,7 @@ class Object:
 
 
 # specMech Microcontroller
-class specMech:
+class SpecMech(Object):
     def __init__(self, name, bootTime, clockTime, version):
         super().__init__(name)
         self.bootTime = bootTime
@@ -107,26 +106,27 @@ class Pressure(Object):
 def add_checksum(msg):
     tmpCheckSum = ft.reduce(lambda x, y: x ^ y, msg.encode())
     checkSum = '{:X}'.format(tmpCheckSum)
-    return '$'+msg+'*'+checkSum
+    return '$' + msg + '*' + checkSum
 
 
 # processes the command
 async def process_command(msg):
     verb = msg[0]
+    rem = ''
+    tmpReply = ''
 
     if verb == 'R':
-        specMech1.reboot()
+        specMech.reboot()
         return ''
 
     obj = msg[1]
 
     if msg[-1:] == '\n':
-        rem = msg[2:-2]     # Get the remainder of the message minus \r\n
+        rem = msg[2:-2]  # Get the remainder of the message minus \r\n
     elif msg[-1:] == '\r':
         rem = msg[2:-1]  # Get the remainder of the message minus \r
 
-
-    if verb == 'M':      # Check if verb is abs move
+    if verb == 'M':  # Check if verb is abs move
         move = int(rem)
         if obj == 'p':
             taskA = asyncio.create_task(aColl.move_absolute(move))
@@ -143,7 +143,7 @@ async def process_command(msg):
         elif obj == 'c':
             await cColl.move_absolute(move)
 
-    elif verb == 'm':      # Check if verb is rel move
+    elif verb == 'm':  # Check if verb is rel move
         move = int(rem)
         if obj == 'p':
             taskA = asyncio.create_task(aColl.move_relative(move))
@@ -160,11 +160,11 @@ async def process_command(msg):
         elif obj == 'c':
             await cColl.move_relative(move)
 
-    elif verb == 's':                   # Check if verb is set time
-        specMech1.clockTime = rem
+    elif verb == 's':  # Check if verb is set time
+        specMech.clockTime = rem
 
     elif rem == '':
-        if verb == 'o':    # Check if verb is open/close
+        if verb == 'o':  # Check if verb is open/close
             if obj == 's':
                 shutter.open()
 
@@ -184,13 +184,13 @@ async def process_command(msg):
             elif obj == 'r':
                 rightHart.close()
 
-        elif verb == 'e':                   # Check if verb is expose
+        elif verb == 'e':  # Check if verb is expose
             # Depending on object, go through expose routine
             return ''
 
-        elif verb == 'r':                   # Check if verb is report
+        elif verb == 'r':  # Check if verb is report
             if obj == 'B':
-                btm = specMech1.bootTime
+                btm = specMech.bootTime
                 tmpReply = f"S2BTM,{btm}"
 
             elif obj == 'a':
@@ -236,11 +236,11 @@ async def process_command(msg):
                 tmpReply = f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p"
 
             elif obj == 't':
-                tTIM = specMech1.clockTime
+                tTIM = specMech.clockTime
                 tmpReply = f"S2TIM,{tTIM}"
 
             elif obj == 'v':
-                vVER = specMech1.version
+                vVER = specMech.version
                 tmpReply = f"S2VER,{vVER}"
 
             elif obj == 's':
@@ -255,36 +255,36 @@ async def process_command(msg):
 async def check_data(msg):
     verb = msg[0]
 
-    if verb in verbDict:        # Check if the verb is valid
+    if verb in verbDict:  # Check if the verb is valid
         if verb == 'R':
             return ''
 
         obj = msg[1]
         objList = verbDict[verb]
 
-        if obj in objList:      # Check if the object is valid for the given verb
+        if obj in objList:  # Check if the object is valid for the given verb
             if msg[-1:] == '\n':
-                rem = msg[2:-2]     # Get the remainder of the message minus \r\n
+                rem = msg[2:-2]  # Get the remainder of the message minus \r\n
             elif msg[-1:] == '\r':
                 rem = msg[2:-1]  # Get the remainder of the message minus \r
             else:
                 return "$S2ERR*24"
 
-            if verb == 'M':      # Check if verb is abs move
+            if verb == 'M':  # Check if verb is abs move
                 try:
-                    move = int(rem)
+                    int(rem)
 
                 except ValueError:
                     return "$S2ERR*24"
 
-            elif verb == 'm':      # Check if verb is rel move
+            elif verb == 'm':  # Check if verb is rel move
                 try:
-                    move = int(rem)
+                    int(rem)
 
                 except ValueError:
                     return "$S2ERR*24"
 
-            elif verb == 's':                   # Check if verb is set time
+            elif verb == 's':  # Check if verb is set time
                 try:
                     str(rem)
 
@@ -319,6 +319,8 @@ async def handle_data(reader, writer):
             reply = reply + '\r\n>'
             print(f"Reply: {reply!r}")
             writer.write(reply.encode())
+            await writer.drain()
+
     await writer.drain()
     writer.close()
 
@@ -332,11 +334,12 @@ async def main():
     async with server:
         await server.serve_forever()
 
+
 if __name__ == "__main__":
-    specMech1 = specMech('specMech',
-                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
-                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
-                         '2020-12-02')
+    specMech = SpecMech('specMech',
+                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                        '2020-12-02')
 
     shutter = Door('s', 'c')
     leftHart = Door('l', 'c')
