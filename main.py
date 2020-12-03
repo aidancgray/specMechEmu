@@ -3,54 +3,104 @@ import asyncio
 import functools as ft
 import time
 
+
 # Dictionary of valid verbs with their valid objects
 verbDict = {
     'e': ['e', 'l', 'r', 's'],
-    'o': ['s', 'l', 'r', 'b'],
-    'c': ['s', 'l', 'r', 'b'],
+    'o': ['s', 'l', 'r'],
+    'c': ['s', 'l', 'r'],
     'M': ['a', 'b', 'c', 'p'],
     'm': ['a', 'b', 'c', 'p', 'H'],
     's': ['t'],
-    'r': ['A', 'B', 'e', 'i', 'o', 'p', 's', 't', 'v'],
+    'r': ['a', 'b', 'c', 'B', 'e', 'i', 'o', 'p', 's', 't', 'v'],
     'R': []
 }
 
-# Dictionary of hardware and their associated states/values
-hardwareDict = {
-    'a': 0,                 # Collimator Motor Positions
-    'b': 0,
-    'c': 0,
 
-    'B': '0-0-0T0:0:0Z',    # Boot time
+# General Object Class
+class Object:
+    def __init__(self, name):
+        self.name = name
 
-    'e': {                  # Environment
-        'T0': 12,           # Temperature
-        'H0': 44,           # Humidity
-        'T1': 13,
-        'H1': 42,
-        'T2': 11,
-        'H2': 48,
-        'T3': 12,
-        'H3': 43},
 
-    'i': {                  # Ion Pump Voltage
-        'r': 1432,
-        'b': 1243},
+# specMech Microcontroller
+class specMech:
+    def __init__(self, name, bootTime, clockTime, version):
+        super().__init__(name)
+        self.bootTime = bootTime
+        self.clockTime = clockTime
+        self.version = version
+        self.rebooted = True
 
-    'o': {                  # Accelerometer in milli-g
-        'x': 32,
-        'y': 100,
-        'z': 989},
+    def reboot(self):
+        self.rebooted = True
 
-    'p': {
-        's': 'c',           # Shutter
-        'l': 'c',           # Left Hartmann
-        'r': 'c',           # Right Hartmann
-        'p': 1},          # Air Pressure
+    def reboot_ack(self):
+        self.rebooted = False
 
-    't': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
-    'v': '2020-11-30'
-}
+
+# For the Shutter and Hartmann Doors
+class Door(Object):
+    def __init__(self, name, state):
+        super().__init__(name)
+        self.state = state
+
+    def open(self):
+        self.state = 't'
+        # wait for 5 seconds non-blocking
+        self.state = 'o'
+
+    def close(self):
+        self.state = 't'
+        # wait for 5 seconds non-blocking
+        self.state = 'c'
+
+
+# Collimator Pistons
+class Piston(Object):
+    def __init__(self, name, position):
+        super().__init__(name)
+        self.position = position
+
+    async def move_absolute(self, loc):
+        self.position = loc
+
+    async def move_relative(self, dist):
+        self.position = self.position + dist
+
+    def home(self):
+        self.position = 0
+
+
+# Accelerometer
+class Accelerometer(Object):
+    def __init__(self, name, xPos, yPos, zPos):
+        super().__init__(name)
+        self.xPos = xPos
+        self.yPos = yPos
+        self.zPos = zPos
+
+
+# Ion Pump
+class IonPump(Object):
+    def __init__(self, name, voltage):
+        super().__init__(name)
+        self.voltage = voltage
+
+
+# Environment (Temperature & Humidity)
+class Environment(Object):
+    def __init__(self, name, temp, hum):
+        super().__init__(name)
+        self.temperature = temp
+        self.humidity = hum
+
+
+# Air Pressure
+class Pressure(Object):
+    def __init__(self, name, pressure):
+        super().__init__(name)
+        self.pressure = pressure
 
 
 # gets the checksum of the NMEA response and adds it to the reply
@@ -60,39 +110,149 @@ def add_checksum(msg):
     return '$'+msg+'*'+checkSum
 
 
-# opens/closes the object by setting state to t, waiting,
-# then setting to open/close
-async def open_close(v, o):
-    hardwareDict[o] = 't'
-    await asyncio.sleep(5)
-    hardwareDict[o] = v
+# processes the command
+async def process_command(msg):
+    verb = msg[0]
+
+    if verb == 'R':
+        specMech1.reboot()
+        return ''
+
+    obj = msg[1]
+
+    if msg[-1:] == '\n':
+        rem = msg[2:-2]     # Get the remainder of the message minus \r\n
+    elif msg[-1:] == '\r':
+        rem = msg[2:-1]  # Get the remainder of the message minus \r
 
 
-# absolute move the collimator motors by setting state to t, waiting,
-# then setting to final position
-async def move_abs(motor, move):
-    currentPosition = hardwareDict['p'][motor]
-    deltaMove = currentPosition - move
-    delay = abs(deltaMove) * 0.01
-    hardwareDict['p'][motor] = 't'
-    await asyncio.sleep(delay)
-    hardwareDict['p'][motor] = move
+    if verb == 'M':      # Check if verb is abs move
+        move = int(rem)
+        if obj == 'p':
+            taskA = asyncio.create_task(aColl.move_absolute(move))
+            taskB = asyncio.create_task(bColl.move_absolute(move))
+            taskC = asyncio.create_task(cColl.move_absolute(move))
+            await asyncio.gather(taskA, taskB, taskC)
+
+        elif obj == 'a':
+            await aColl.move_absolute(move)
+
+        elif obj == 'b':
+            await bColl.move_absolute(move)
+
+        elif obj == 'c':
+            await cColl.move_absolute(move)
+
+    elif verb == 'm':      # Check if verb is rel move
+        move = int(rem)
+        if obj == 'p':
+            taskA = asyncio.create_task(aColl.move_relative(move))
+            taskB = asyncio.create_task(bColl.move_relative(move))
+            taskC = asyncio.create_task(cColl.move_relative(move))
+            await asyncio.gather(taskA, taskB, taskC)
+
+        elif obj == 'a':
+            await aColl.move_relative(move)
+
+        elif obj == 'b':
+            await bColl.move_relative(move)
+
+        elif obj == 'c':
+            await cColl.move_relative(move)
+
+    elif verb == 's':                   # Check if verb is set time
+        specMech1.clockTime = rem
+
+    elif rem == '':
+        if verb == 'o':    # Check if verb is open/close
+            if obj == 's':
+                shutter.open()
+
+            elif obj == 'l':
+                leftHart.open()
+
+            elif obj == 'r':
+                rightHart.open()
+
+        elif verb == 'c':
+            if obj == 's':
+                shutter.close()
+
+            elif obj == 'l':
+                leftHart.close()
+
+            elif obj == 'r':
+                rightHart.close()
+
+        elif verb == 'e':                   # Check if verb is expose
+            # Depending on object, go through expose routine
+            return ''
+
+        elif verb == 'r':                   # Check if verb is report
+            if obj == 'B':
+                btm = specMech1.bootTime
+                tmpReply = f"S2BTM,{btm}"
+
+            elif obj == 'a':
+                mra = aColl.position
+                tmpReply = f"S2MRA,{mra}"
+
+            elif obj == 'b':
+                mrb = bColl.position
+                tmpReply = f"S2MRB,{mrb}"
+
+            elif obj == 'c':
+                mrc = cColl.position
+                tmpReply = f"S2MRC,{mrc}"
+
+            elif obj == 'e':
+                envT0 = env0.temperature
+                envT1 = env1.temperature
+                envT2 = env2.temperature
+                envT3 = env3.temperature
+                envH0 = env0.humidity
+                envH1 = env1.humidity
+                envH2 = env2.humidity
+                envH3 = env3.humidity
+                tmpReply = f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1," \
+                           f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3"
+
+            elif obj == 'i':
+                rION = rIon.voltage
+                bION = bIon.voltage
+                tmpReply = f"S2ION,{rION},r,{bION},b"
+
+            elif obj == 'o':
+                xACC = accel.xPos
+                yACC = accel.yPos
+                zACC = accel.zPos
+                tmpReply = f"S2ACC,{xACC},{yACC},{zACC}"
+
+            elif obj == 'p':
+                sPNU = shutter.state
+                lPNU = leftHart.state
+                rPNU = rightHart.state
+                pPNU = airPress.pressure
+                tmpReply = f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p"
+
+            elif obj == 't':
+                tTIM = specMech1.clockTime
+                tmpReply = f"S2TIM,{tTIM}"
+
+            elif obj == 'v':
+                vVER = specMech1.version
+                tmpReply = f"S2VER,{vVER}"
+
+            elif obj == 's':
+                # Get all of the statuses
+                tmpReply = f"S2"
+
+            return add_checksum(tmpReply)
+    return ''
 
 
-# relative move the collimator motors by setting state to t, waiting,
-# then setting to final position
-async def move_rel(motor, move):
-    currentPosition = hardwareDict['p'][motor]
-    finalPosition = currentPosition + move
-    hardwareDict['p'][motor] = 't'
-    delay = abs(move) * 0.01
-    await asyncio.sleep(delay)
-    hardwareDict['p'][motor] = finalPosition
-
-
-# parses the message to figure out what to do
+# parses the message to check if command is valid
 async def check_data(msg):
-    loop = asyncio.get_running_loop()
     verb = msg[0]
 
     if verb in verbDict:        # Check if the verb is valid
@@ -113,115 +273,24 @@ async def check_data(msg):
             if verb == 'M':      # Check if verb is abs move
                 try:
                     move = int(rem)
-                    if obj == 'p':
-                        taskA = asyncio.create_task(move_abs('a', move))
-                        taskB = asyncio.create_task(move_abs('b', move))
-                        taskC = asyncio.create_task(move_abs('c', move))
-                        await asyncio.gather(taskA, taskB, taskC)
 
-                    else:
-                        await move_abs(obj, move)
-
-                except:
+                except ValueError:
                     return "$S2ERR*24"
 
             elif verb == 'm':      # Check if verb is rel move
                 try:
                     move = int(rem)
-                    if obj == 'p':
-                        taskA = asyncio.create_task(move_rel('a', move))
-                        taskB = asyncio.create_task(move_rel('b', move))
-                        taskC = asyncio.create_task(move_rel('c', move))
-                        await asyncio.gather(taskA, taskB, taskC)
 
-                    else:
-                        await move_rel(obj, move)
-
-                except:
+                except ValueError:
                     return "$S2ERR*24"
 
             elif verb == 's':                   # Check if verb is set time
                 try:
-                    # Ensure DATETIME format
-                    hardwareDict['t'] = rem
-                except:
+                    str(rem)
+
+                except ValueError:
                     return "$S2ERR*24"
 
-            elif rem == '':
-                if verb == 'o' or verb == 'c':    # Check if verb is open/close
-                    if obj == 'b':
-                        taskL = asyncio.create_task(open_close(verb, 'l'))
-                        taskR = asyncio.create_task(open_close(verb, 'r'))
-                        await asyncio.gather(taskL, taskR)
-
-                    else:
-                        task = asyncio.create_task(open_close(verb, obj))
-                        await asyncio.gather(task)
-
-                elif verb == 'e':                   # Check if verb is expose
-                    # Depending on object, go through expose routine
-                    return ''
-
-                elif verb == 'r':                   # Check if verb is report
-                    if obj == 'B':
-                        btm = hardwareDict['B']
-                        tmpReply = f"S2BTM,{btm}"
-
-                    elif obj == 'a' or obj == 'b' or obj == 'c':
-                        mra = hardwareDict[obj]
-                        tmpReply = f"S2MRA,{mra}"
-
-                    elif obj == 'e':
-                        envT0 = hardwareDict[obj]['T0']
-                        envT1 = hardwareDict[obj]['T1']
-                        envT2 = hardwareDict[obj]['T2']
-                        envT3 = hardwareDict[obj]['T3']
-                        envH0 = hardwareDict[obj]['H0']
-                        envH1 = hardwareDict[obj]['H1']
-                        envH2 = hardwareDict[obj]['H2']
-                        envH3 = hardwareDict[obj]['H3']
-                        tmpReply = f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1," \
-                                   f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3"
-
-                    elif obj == 'i':
-                        rION = hardwareDict[obj]['r']
-                        bION = hardwareDict[obj]['b']
-                        tmpReply = f"S2ION,{rION},r,{bION},b"
-
-                    elif obj == 'o':
-                        xACC = hardwareDict[obj]['x']
-                        yACC = hardwareDict[obj]['y']
-                        zACC = hardwareDict[obj]['z']
-                        tmpReply = f"S2ACC,{xACC},{yACC},{zACC}"
-
-                    elif obj == 'p':
-                        sPNU = hardwareDict[obj]['s']
-                        lPNU = hardwareDict[obj]['l']
-                        rPNU = hardwareDict[obj]['r']
-                        pPNU = hardwareDict[obj]['p']
-                        tmpReply = f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p"
-
-                    elif obj == 's':
-                        sSHT = hardwareDict['s']
-                        tmpReply = f"S2SHT,{sSHT}"
-
-                    elif obj == 't':
-                        tTIM = hardwareDict['t']
-                        tmpReply = f"S2TIM,{tTIM}"
-
-                    elif obj == 'v':
-                        vVER = hardwareDict['v']
-                        tmpReply = f"S2VER,{vVER}"
-
-                    else:
-                        return "$S2ERR*24"
-
-                    return add_checksum(tmpReply)
-
-                else:
-                    return "$S2ERR*24"
-            else:
-                return "$S2ERR*24"
         else:
             return "$S2ERR*24"
     else:
@@ -231,17 +300,25 @@ async def check_data(msg):
 
 
 async def handle_data(reader, writer):
-    data = await reader.read(100)
-    message = data.decode()
-    addr = writer.get_extra_info('peername')
+    loop = True
+    while loop:
+        data = await reader.read(100)
+        message = data.decode()
+        addr = writer.get_extra_info('peername')
+        print(f"Received {message!r} from {addr!r}")
 
-    print(f"Received {message!r} from {addr!r}")
+        if message[:-2] == 'q':
+            loop = False
+        else:
+            check = await check_data(message)
+            check = check + '\r\n>'
+            print(f"Check: {check!r}")
+            writer.write(check.encode())
 
-    reply = await check_data(message)
-
-    reply = reply + '\r\n>'
-    print(f"Send: {reply!r}")
-    writer.write(reply.encode())
+            reply = await process_command(message)
+            reply = reply + '\r\n>'
+            print(f"Reply: {reply!r}")
+            writer.write(reply.encode())
     await writer.drain()
     writer.close()
 
@@ -256,5 +333,29 @@ async def main():
         await server.serve_forever()
 
 if __name__ == "__main__":
-    hardwareDict['B'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime())
+    specMech1 = specMech('specMech',
+                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                         '2020-12-02')
+
+    shutter = Door('s', 'c')
+    leftHart = Door('l', 'c')
+    rightHart = Door('r', 'c')
+
+    aColl = Piston('a', 234324)
+    bColl = Piston('b', 234324)
+    cColl = Piston('c', 234324)
+
+    accel = Accelerometer('accel', 32, 100, 989)
+
+    rIon = IonPump('r', 1432)
+    bIon = IonPump('b', 1243)
+
+    env0 = Environment('0', 12, 44)
+    env1 = Environment('1', 13, 42)
+    env2 = Environment('2', 11, 48)
+    env3 = Environment('3', 12, 43)
+
+    airPress = Pressure('p', 1)
+
     asyncio.run(main())
