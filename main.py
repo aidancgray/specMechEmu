@@ -106,7 +106,7 @@ class Pressure(Object):
 def add_checksum(msg):
     tmpCheckSum = ft.reduce(lambda x, y: x ^ y, msg.encode())
     checkSum = '{:X}'.format(tmpCheckSum)
-    return '$' + msg + '*' + checkSum
+    return '$' + msg + '*' + checkSum + '\r\n'
 
 
 # processes the command
@@ -186,7 +186,23 @@ async def process_command(msg):
 
         elif verb == 'e':  # Check if verb is expose
             # Depending on object, go through expose routine
-            return ''
+            if obj == 's':
+                leftHart.open()
+                rightHart.open()
+                shutter.open()
+
+            elif obj == 'l':
+                leftHart.open()
+                shutter.open()
+
+            elif obj == 'r':
+                rightHart.open()
+                shutter.open()
+
+            elif obj == 'e':
+                leftHart.close()
+                rightHart.close()
+                shutter.close()
 
         elif verb == 'r':  # Check if verb is report
             if obj == 'B':
@@ -245,9 +261,47 @@ async def process_command(msg):
 
             elif obj == 's':
                 # Get all of the statuses
-                tmpReply = f"S2"
+                btm = specMech.bootTime
+                reply = add_checksum(f"S2BTM,{btm}")
+                mra = aColl.position
+                reply = reply + add_checksum(f"S2MRA,{mra}")
+                mrb = bColl.position
+                reply = reply + add_checksum(f"S2MRB,{mrb}")
+                mrc = cColl.position
+                reply = reply + add_checksum(f"S2MRC,{mrc}")
+                envT0 = env0.temperature
+                envT1 = env1.temperature
+                envT2 = env2.temperature
+                envT3 = env3.temperature
+                envH0 = env0.humidity
+                envH1 = env1.humidity
+                envH2 = env2.humidity
+                envH3 = env3.humidity
+                reply = reply + add_checksum(f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1,"
+                                             f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3")
+                rION = rIon.voltage
+                bION = bIon.voltage
+                reply = reply + add_checksum(f"S2ION,{rION},r,{bION},b")
+                xACC = accel.xPos
+                yACC = accel.yPos
+                zACC = accel.zPos
+                reply = reply + add_checksum(f"S2ACC,{xACC},{yACC},{zACC}")
+                sPNU = shutter.state
+                lPNU = leftHart.state
+                rPNU = rightHart.state
+                pPNU = airPress.pressure
+                reply = reply + add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
+                tTIM = specMech.clockTime
+                reply = reply + add_checksum(f"S2TIM,{tTIM}")
+                vVER = specMech.version
+                reply = reply + add_checksum(f"S2VER,{vVER}")
+                return reply
+
+            else:
+                return ''
 
             return add_checksum(tmpReply)
+
     return ''
 
 
@@ -268,33 +322,33 @@ async def check_data(msg):
             elif msg[-1:] == '\r':
                 rem = msg[2:-1]  # Get the remainder of the message minus \r
             else:
-                return "$S2ERR*24"
+                return "$S2ERR*24\r\n"
 
             if verb == 'M':  # Check if verb is abs move
                 try:
                     int(rem)
 
                 except ValueError:
-                    return "$S2ERR*24"
+                    return "$S2ERR*24\r\n"
 
             elif verb == 'm':  # Check if verb is rel move
                 try:
                     int(rem)
 
                 except ValueError:
-                    return "$S2ERR*24"
+                    return "$S2ERR*24\r\n"
 
             elif verb == 's':  # Check if verb is set time
                 try:
                     str(rem)
 
                 except ValueError:
-                    return "$S2ERR*24"
+                    return "$S2ERR*24\r\n"
 
         else:
-            return "$S2ERR*24"
+            return "$S2ERR*24\r\n"
     else:
-        return "$S2ERR*24"
+        return "$S2ERR*24\r\n"
 
     return ''
 
@@ -311,7 +365,6 @@ async def handle_data(reader, writer):
             loop = False
         else:
             check = await check_data(message)
-            check = check + '\r\n>'
             print(f"Check: {check!r}")
             writer.write(check.encode())
 
