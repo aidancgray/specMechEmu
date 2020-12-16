@@ -115,6 +115,13 @@ async def process_command(msg):
     rem = ''
     tmpReply = ''
 
+    if specMech.rebooted:
+        if msg == '!\r' or msg == '!\r\n':
+            specMech.rebooted = False
+            return ''
+        else:
+            return ''
+
     if verb == 'R':
         specMech.reboot()
         return ''
@@ -309,6 +316,12 @@ async def process_command(msg):
 async def check_data(msg):
     verb = msg[0]
 
+    if specMech.rebooted:
+        if msg != '!\r' and msg != '!\r\n':
+            return "\r\n!"
+        else:
+            return ''
+
     if verb in verbDict:  # Check if the verb is valid
         if verb == 'R':
             return ''
@@ -392,7 +405,7 @@ if __name__ == "__main__":
     specMech = SpecMech('specMech',
                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
-                        '2020-12-02')
+                        '2020-12-16')
 
     shutter = Door('s', 'c')
     leftHart = Door('l', 'c')
