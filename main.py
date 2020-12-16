@@ -44,15 +44,17 @@ class Door(Object):
         super().__init__(name)
         self.state = state
 
-    def open(self):
-        self.state = 't'
-        # wait for 5 seconds non-blocking
-        self.state = 'o'
+    async def open(self):
+        if self.state == 'c':
+            self.state = 't'
+            await asyncio.sleep(0.5)
+            self.state = 'o'
 
-    def close(self):
-        self.state = 't'
-        # wait for 5 seconds non-blocking
-        self.state = 'c'
+    async def close(self):
+        if self.state == 'o':
+            self.state = 't'
+            await asyncio.sleep(0.5)
+            self.state = 'c'
 
 
 # Collimator Pistons
@@ -110,206 +112,233 @@ def add_checksum(msg):
 
 
 # processes the command
-async def process_command(msg):
+async def process_command(writer, msg):
     verb = msg[0]
     rem = ''
-    tmpReply = ''
+    reply = ''
 
     if specMech.rebooted:
         if msg == '!\r' or msg == '!\r\n':
             specMech.rebooted = False
-            return ''
+
+        reply = reply + '\r\n>'
+        print(f"Reply: {reply!r}")
+        writer.write(reply.encode())
+
+    else:
+        if verb == 'R':
+            specMech.reboot()
+            reply = reply + '\r\n>'
+            print(f"Reply: {reply!r}")
+            writer.write(reply.encode())
         else:
-            return ''
+            obj = msg[1]
 
-    if verb == 'R':
-        specMech.reboot()
-        return ''
+            if msg[-1:] == '\n':
+                rem = msg[2:-2]  # Get the remainder of the message minus \r\n
+            elif msg[-1:] == '\r':
+                rem = msg[2:-1]  # Get the remainder of the message minus \r
 
-    obj = msg[1]
+            if verb == 'M':  # Check if verb is abs move
+                reply = reply + '\r\n>'
+                print(f"Reply: {reply!r}")
+                writer.write(reply.encode())
 
-    if msg[-1:] == '\n':
-        rem = msg[2:-2]  # Get the remainder of the message minus \r\n
-    elif msg[-1:] == '\r':
-        rem = msg[2:-1]  # Get the remainder of the message minus \r
+                move = int(rem)
+                if obj == 'p':
+                    taskA = asyncio.create_task(aColl.move_absolute(move))
+                    taskB = asyncio.create_task(bColl.move_absolute(move))
+                    taskC = asyncio.create_task(cColl.move_absolute(move))
+                    await asyncio.gather(taskA, taskB, taskC)
 
-    if verb == 'M':  # Check if verb is abs move
-        move = int(rem)
-        if obj == 'p':
-            taskA = asyncio.create_task(aColl.move_absolute(move))
-            taskB = asyncio.create_task(bColl.move_absolute(move))
-            taskC = asyncio.create_task(cColl.move_absolute(move))
-            await asyncio.gather(taskA, taskB, taskC)
+                elif obj == 'a':
+                    await aColl.move_absolute(move)
 
-        elif obj == 'a':
-            await aColl.move_absolute(move)
+                elif obj == 'b':
+                    await bColl.move_absolute(move)
 
-        elif obj == 'b':
-            await bColl.move_absolute(move)
+                elif obj == 'c':
+                    await cColl.move_absolute(move)
 
-        elif obj == 'c':
-            await cColl.move_absolute(move)
+            elif verb == 'm':  # Check if verb is rel move
+                reply = reply + '\r\n>'
+                print(f"Reply: {reply!r}")
+                writer.write(reply.encode())
 
-    elif verb == 'm':  # Check if verb is rel move
-        move = int(rem)
-        if obj == 'p':
-            taskA = asyncio.create_task(aColl.move_relative(move))
-            taskB = asyncio.create_task(bColl.move_relative(move))
-            taskC = asyncio.create_task(cColl.move_relative(move))
-            await asyncio.gather(taskA, taskB, taskC)
+                move = int(rem)
+                if obj == 'p':
+                    taskA = asyncio.create_task(aColl.move_relative(move))
+                    taskB = asyncio.create_task(bColl.move_relative(move))
+                    taskC = asyncio.create_task(cColl.move_relative(move))
+                    await asyncio.gather(taskA, taskB, taskC)
 
-        elif obj == 'a':
-            await aColl.move_relative(move)
+                elif obj == 'a':
+                    await aColl.move_relative(move)
 
-        elif obj == 'b':
-            await bColl.move_relative(move)
+                elif obj == 'b':
+                    await bColl.move_relative(move)
 
-        elif obj == 'c':
-            await cColl.move_relative(move)
+                elif obj == 'c':
+                    await cColl.move_relative(move)
 
-    elif verb == 's':  # Check if verb is set time
-        specMech.clockTime = rem
+            elif verb == 's':  # Check if verb is set time
+                specMech.clockTime = rem
 
-    elif rem == '':
-        if verb == 'o':  # Check if verb is open/close
-            if obj == 's':
-                shutter.open()
+            elif rem == '':
+                if verb == 'o':  # Check if verb is open/close
+                    reply = reply + '\r\n>'
+                    print(f"Reply: {reply!r}")
+                    writer.write(reply.encode())
 
-            elif obj == 'l':
-                leftHart.open()
+                    if obj == 's':
+                        await shutter.open()
 
-            elif obj == 'r':
-                rightHart.open()
+                    elif obj == 'l':
+                        await leftHart.open()
 
-        elif verb == 'c':
-            if obj == 's':
-                shutter.close()
+                    elif obj == 'r':
+                        await rightHart.open()
 
-            elif obj == 'l':
-                leftHart.close()
+                elif verb == 'c':
+                    reply = reply + '\r\n>'
+                    print(f"Reply: {reply!r}")
+                    writer.write(reply.encode())
 
-            elif obj == 'r':
-                rightHart.close()
+                    if obj == 's':
+                        await shutter.close()
 
-        elif verb == 'e':  # Check if verb is expose
-            # Depending on object, go through expose routine
-            if obj == 's':
-                leftHart.open()
-                rightHart.open()
-                shutter.open()
+                    elif obj == 'l':
+                        await leftHart.close()
 
-            elif obj == 'l':
-                leftHart.open()
-                shutter.open()
+                    elif obj == 'r':
+                        await rightHart.close()
 
-            elif obj == 'r':
-                rightHart.open()
-                shutter.open()
+                elif verb == 'e':  # Check if verb is expose
+                    reply = reply + '\r\n>'
+                    print(f"Reply: {reply!r}")
+                    writer.write(reply.encode())
 
-            elif obj == 'e':
-                leftHart.close()
-                rightHart.close()
-                shutter.close()
+                    # Depending on object, go through expose routine
+                    if obj == 's':
+                        taskL = asyncio.create_task(leftHart.open())
+                        taskR = asyncio.create_task(rightHart.open())
+                        await asyncio.gather(taskL, taskR)
+                        await shutter.open()
 
-        elif verb == 'r':  # Check if verb is report
-            if obj == 'B':
-                btm = specMech.bootTime
-                tmpReply = f"S2BTM,{btm}"
+                    elif obj == 'l':
+                        taskL = asyncio.create_task(leftHart.open())
+                        taskR = asyncio.create_task(rightHart.close())
+                        await asyncio.gather(taskL, taskR)
+                        await shutter.open()
 
-            elif obj == 'a':
-                mra = aColl.position
-                tmpReply = f"S2MRA,{mra}"
+                    elif obj == 'r':
+                        taskL = asyncio.create_task(leftHart.close())
+                        taskR = asyncio.create_task(rightHart.open())
+                        await asyncio.gather(taskL, taskR)
+                        await shutter.open()
 
-            elif obj == 'b':
-                mrb = bColl.position
-                tmpReply = f"S2MRB,{mrb}"
+                    elif obj == 'e':
+                        taskL = asyncio.create_task(leftHart.close())
+                        taskR = asyncio.create_task(rightHart.close())
+                        await asyncio.gather(taskL, taskR)
+                        await shutter.close()
 
-            elif obj == 'c':
-                mrc = cColl.position
-                tmpReply = f"S2MRC,{mrc}"
+                elif verb == 'r':  # Check if verb is report
+                    if obj == 'B':
+                        btm = specMech.bootTime
+                        reply = add_checksum(f"S2BTM,{btm}")
 
-            elif obj == 'e':
-                envT0 = env0.temperature
-                envT1 = env1.temperature
-                envT2 = env2.temperature
-                envT3 = env3.temperature
-                envH0 = env0.humidity
-                envH1 = env1.humidity
-                envH2 = env2.humidity
-                envH3 = env3.humidity
-                tmpReply = f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1," \
-                           f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3"
+                    elif obj == 'a':
+                        mra = aColl.position
+                        reply = add_checksum(f"S2MRA,{mra}")
 
-            elif obj == 'i':
-                rION = rIon.voltage
-                bION = bIon.voltage
-                tmpReply = f"S2ION,{rION},r,{bION},b"
+                    elif obj == 'b':
+                        mrb = bColl.position
+                        reply = add_checksum(f"S2MRB,{mrb}")
 
-            elif obj == 'o':
-                xACC = accel.xPos
-                yACC = accel.yPos
-                zACC = accel.zPos
-                tmpReply = f"S2ACC,{xACC},{yACC},{zACC}"
+                    elif obj == 'c':
+                        mrc = cColl.position
+                        reply = add_checksum(f"S2MRC,{mrc}")
 
-            elif obj == 'p':
-                sPNU = shutter.state
-                lPNU = leftHart.state
-                rPNU = rightHart.state
-                pPNU = airPress.pressure
-                tmpReply = f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p"
+                    elif obj == 'e':
+                        envT0 = env0.temperature
+                        envT1 = env1.temperature
+                        envT2 = env2.temperature
+                        envT3 = env3.temperature
+                        envH0 = env0.humidity
+                        envH1 = env1.humidity
+                        envH2 = env2.humidity
+                        envH3 = env3.humidity
+                        reply = f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1," \
+                                f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3"
+                        reply = add_checksum(reply)
 
-            elif obj == 't':
-                tTIM = specMech.clockTime
-                tmpReply = f"S2TIM,{tTIM}"
+                    elif obj == 'i':
+                        rION = rIon.voltage
+                        bION = bIon.voltage
+                        reply = add_checksum(f"S2ION,{rION},r,{bION},b")
 
-            elif obj == 'v':
-                vVER = specMech.version
-                tmpReply = f"S2VER,{vVER}"
+                    elif obj == 'o':
+                        xACC = accel.xPos
+                        yACC = accel.yPos
+                        zACC = accel.zPos
+                        reply = add_checksum(f"S2ACC,{xACC},{yACC},{zACC}")
 
-            elif obj == 's':
-                # Get all of the statuses
-                btm = specMech.bootTime
-                reply = add_checksum(f"S2BTM,{btm}")
-                mra = aColl.position
-                reply = reply + add_checksum(f"S2MRA,{mra}")
-                mrb = bColl.position
-                reply = reply + add_checksum(f"S2MRB,{mrb}")
-                mrc = cColl.position
-                reply = reply + add_checksum(f"S2MRC,{mrc}")
-                envT0 = env0.temperature
-                envT1 = env1.temperature
-                envT2 = env2.temperature
-                envT3 = env3.temperature
-                envH0 = env0.humidity
-                envH1 = env1.humidity
-                envH2 = env2.humidity
-                envH3 = env3.humidity
-                reply = reply + add_checksum(f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1,"
-                                             f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3")
-                rION = rIon.voltage
-                bION = bIon.voltage
-                reply = reply + add_checksum(f"S2ION,{rION},r,{bION},b")
-                xACC = accel.xPos
-                yACC = accel.yPos
-                zACC = accel.zPos
-                reply = reply + add_checksum(f"S2ACC,{xACC},{yACC},{zACC}")
-                sPNU = shutter.state
-                lPNU = leftHart.state
-                rPNU = rightHart.state
-                pPNU = airPress.pressure
-                reply = reply + add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
-                tTIM = specMech.clockTime
-                reply = reply + add_checksum(f"S2TIM,{tTIM}")
-                vVER = specMech.version
-                reply = reply + add_checksum(f"S2VER,{vVER}")
-                return reply
+                    elif obj == 'p':
+                        sPNU = shutter.state
+                        lPNU = leftHart.state
+                        rPNU = rightHart.state
+                        pPNU = airPress.pressure
+                        reply = add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
 
-            else:
-                return ''
+                    elif obj == 't':
+                        tTIM = specMech.clockTime
+                        reply = add_checksum(f"S2TIM,{tTIM}")
 
-            return add_checksum(tmpReply)
+                    elif obj == 'v':
+                        vVER = specMech.version
+                        reply = add_checksum(f"S2VER,{vVER}")
 
-    return ''
+                    elif obj == 's':
+                        # Get all of the statuses
+                        btm = specMech.bootTime
+                        reply = add_checksum(f"S2BTM,{btm}")
+                        mra = aColl.position
+                        reply = reply + add_checksum(f"S2MRA,{mra}")
+                        mrb = bColl.position
+                        reply = reply + add_checksum(f"S2MRB,{mrb}")
+                        mrc = cColl.position
+                        reply = reply + add_checksum(f"S2MRC,{mrc}")
+                        envT0 = env0.temperature
+                        envT1 = env1.temperature
+                        envT2 = env2.temperature
+                        envT3 = env3.temperature
+                        envH0 = env0.humidity
+                        envH1 = env1.humidity
+                        envH2 = env2.humidity
+                        envH3 = env3.humidity
+                        reply = reply + add_checksum(f"S2ENV,{envT0}C,{envH0}%,0,{envT1}C,{envH1}%,1,"
+                                                     f"{envT2}C,{envH2}%,2,{envT3}C,{envH3}%,3")
+                        rION = rIon.voltage
+                        bION = bIon.voltage
+                        reply = reply + add_checksum(f"S2ION,{rION},r,{bION},b")
+                        xACC = accel.xPos
+                        yACC = accel.yPos
+                        zACC = accel.zPos
+                        reply = reply + add_checksum(f"S2ACC,{xACC},{yACC},{zACC}")
+                        sPNU = shutter.state
+                        lPNU = leftHart.state
+                        rPNU = rightHart.state
+                        pPNU = airPress.pressure
+                        reply = reply + add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
+                        tTIM = specMech.clockTime
+                        reply = reply + add_checksum(f"S2TIM,{tTIM}")
+                        vVER = specMech.version
+                        reply = reply + add_checksum(f"S2VER,{vVER}")
+
+                    reply = reply + '\r\n>'
+                    print(f"Reply: {reply!r}")
+                    writer.write(reply.encode())
 
 
 # parses the message to check if command is valid
@@ -381,10 +410,8 @@ async def handle_data(reader, writer):
             print(f"Check: {check!r}")
             writer.write(check.encode())
 
-            reply = await process_command(message)
-            reply = reply + '\r\n>'
-            print(f"Reply: {reply!r}")
-            writer.write(reply.encode())
+            taskProcess = asyncio.create_task(process_command(writer, message))
+
             await writer.drain()
 
     await writer.drain()
