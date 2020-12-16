@@ -410,7 +410,7 @@ async def handle_data(reader, writer):
             print(f"Check: {check!r}")
             writer.write(check.encode())
 
-            taskProcess = asyncio.create_task(process_command(writer, message))
+            asyncio.create_task(process_command(writer, message))
 
             await writer.drain()
 
