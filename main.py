@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+# specMechEmu.py
+# 12/17/2020
+# Aidan Gray
+# aidan.gray@idg.jhu.edu
+#
+# This is an emulator for the BOSS specMech hardware microcontroller. The
+# intent is to use this emulator to simulate the specMech mcu during
+# development of the specActor. Functionality is based on the document:
+#   "specMech Communications Guide" provided by Alan Uomoto.
+
+from contextlib import suppress
 import asyncio
 import functools as ft
 import time
@@ -16,32 +27,37 @@ verbDict = {
 }
 
 
-# General Object Class
-class Object:
-    def __init__(self, name):
-        self.name = name
-
-
 # specMech Microcontroller
-class SpecMech(Object):
-    def __init__(self, name, bootTime, clockTime, version):
-        super().__init__(name)
+class SpecMech:
+    def __init__(self, name, bootTime, clockDelta, version):
+        self.name = name
         self.bootTime = bootTime
-        self.clockTime = clockTime
+        self.clockDelta = clockDelta
         self.version = version
         self.rebooted = True
 
+    def get_time(self):
+        tCur = time.mktime(time.gmtime(time.time()))
+        clockTime = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime(tCur + self.clockDelta))
+        return clockTime
+
+    def set_clock_delta(self, setTime):
+        tSet = time.mktime(time.strptime(setTime, '%Y-%m-%dT%H:%M:%SZ'))
+        tCur = time.mktime(time.gmtime(time.time()))
+        self.clockDelta = tSet - tCur
+
     def reboot(self):
         self.rebooted = True
+        self.clockDelta = 0
 
     def reboot_ack(self):
         self.rebooted = False
 
 
 # For the Shutter and Hartmann Doors
-class Door(Object):
+class Door:
     def __init__(self, name, state):
-        super().__init__(name)
+        self.name = name
         self.state = state
 
     async def open(self):
@@ -58,9 +74,9 @@ class Door(Object):
 
 
 # Collimator Pistons
-class Piston(Object):
+class Piston:
     def __init__(self, name, position):
-        super().__init__(name)
+        self.name = name
         self.position = position
 
     async def move_absolute(self, loc):
@@ -74,34 +90,48 @@ class Piston(Object):
 
 
 # Accelerometer
-class Accelerometer(Object):
+class Accelerometer:
     def __init__(self, name, xPos, yPos, zPos):
-        super().__init__(name)
+        self.name = name
         self.xPos = xPos
         self.yPos = yPos
         self.zPos = zPos
 
 
 # Ion Pump
-class IonPump(Object):
+class IonPump:
     def __init__(self, name, voltage):
-        super().__init__(name)
+        self.name = name
         self.voltage = voltage
 
 
 # Environment (Temperature & Humidity)
-class Environment(Object):
+class Environment:
     def __init__(self, name, temp, hum):
-        super().__init__(name)
+        self.name = name
         self.temperature = temp
         self.humidity = hum
 
 
 # Air Pressure
-class Pressure(Object):
+class Pressure:
     def __init__(self, name, pressure):
-        super().__init__(name)
+        self.name = name
         self.pressure = pressure
+
+
+# Cancels all running asyncio Tasks
+async def shutdown():
+    print('~~~ Shutting down...')
+    print('~~~ cancelling task:')
+    i = 1
+    for task in asyncio.all_tasks():
+        print(f'~~~ {i}')
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        i += 1
+    print('~~~ Done.')
 
 
 # gets the checksum of the NMEA response and adds it to the reply
@@ -182,7 +212,13 @@ async def process_command(writer, msg):
                     await cColl.move_relative(move)
 
             elif verb == 's':  # Check if verb is set time
-                specMech.clockTime = rem
+                reply = reply + '\r\n>'
+                print(f"Reply: {reply!r}")
+                writer.write(reply.encode())
+                try:
+                    specMech.set_clock_delta(rem)
+                except ValueError:
+                    pass
 
             elif rem == '':
                 if verb == 'o':  # Check if verb is open/close
@@ -292,7 +328,7 @@ async def process_command(writer, msg):
                         reply = add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
 
                     elif obj == 't':
-                        tTIM = specMech.clockTime
+                        tTIM = specMech.get_time()
                         reply = add_checksum(f"S2TIM,{tTIM}")
 
                     elif obj == 'v':
@@ -331,7 +367,7 @@ async def process_command(writer, msg):
                         rPNU = rightHart.state
                         pPNU = airPress.pressure
                         reply = reply + add_checksum(f"S2PNU,{sPNU},s,{lPNU},l,{rPNU},r,{pPNU},p")
-                        tTIM = specMech.clockTime
+                        tTIM = specMech.get_time()
                         reply = reply + add_checksum(f"S2TIM,{tTIM}")
                         vVER = specMech.version
                         reply = reply + add_checksum(f"S2VER,{vVER}")
@@ -382,7 +418,7 @@ async def check_data(msg):
 
             elif verb == 's':  # Check if verb is set time
                 try:
-                    str(rem)
+                    time.mktime(time.strptime(rem, '%Y-%m-%dT%H:%M:%SZ'))
 
                 except ValueError:
                     return "$S2ERR*24\r\n"
@@ -396,15 +432,15 @@ async def check_data(msg):
 
 
 async def handle_data(reader, writer):
-    loop = True
-    while loop:
+    dataLoop = True
+    while dataLoop:
         data = await reader.read(100)
         message = data.decode()
         addr = writer.get_extra_info('peername')
         print(f"Received {message!r} from {addr!r}")
 
         if message[:-2] == 'q':
-            loop = False
+            dataLoop = False
         else:
             check = await check_data(message)
             print(f"Check: {check!r}")
@@ -416,6 +452,7 @@ async def handle_data(reader, writer):
 
     await writer.drain()
     writer.close()
+    await shutdown()
 
 
 async def main():
@@ -425,13 +462,14 @@ async def main():
     print(f"Serving on {addr}")
 
     async with server:
-        await server.serve_forever()
+        with suppress(asyncio.CancelledError):
+            await server.serve_forever()
 
 
 if __name__ == "__main__":
     specMech = SpecMech('specMech',
                         time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
-                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                        0,
                         '2020-12-16')
 
     shutter = Door('s', 'c')
@@ -454,4 +492,7 @@ if __name__ == "__main__":
 
     airPress = Pressure('p', 1)
 
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('~~~Keyboard Interrupt~~~')
