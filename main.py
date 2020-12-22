@@ -13,6 +13,7 @@ from contextlib import suppress
 import asyncio
 import functools as ft
 import time
+# import sys
 
 # Dictionary of valid verbs with their valid objects
 verbDict = {
@@ -435,28 +436,33 @@ async def check_data(msg):
 async def handle_data(reader, writer):
     dataLoop = True
     while dataLoop:
-        data = await reader.read(100)
-        message = data.decode()
-        addr = writer.get_extra_info('peername')
-        print(f"Received {message!r} from {addr!r}")
+        try:
+            data = await reader.read(100)
+            message = data.decode()
+            addr = writer.get_extra_info('peername')
+            print(f"Received {message!r} from {addr!r}")
 
-        if message[:-2] == 'q':
-            dataLoop = False
+            if message[:-2] == 'q':
+                dataLoop = False
 
-        elif len(message) == 0:
-            check = '$S2ERR*24\r\n\r\n>'
-            print(f'Check: {check!r}')
-            writer.write(check.encode())
-            await writer.drain()
+            elif len(message) == 0:
+                check = '$S2ERR*24\r\n\r\n>'
+                print(f'Check: {check!r}')
+                writer.write(check.encode())
+                await writer.drain()
 
-        else:
-            check = await check_data(message)
-            print(f"Check: {check!r}")
-            writer.write(check.encode())
+            else:
+                check = await check_data(message)
+                print(f"Check: {check!r}")
+                writer.write(check.encode())
 
-            asyncio.create_task(process_command(writer, message))
+                asyncio.create_task(process_command(writer, message))
 
-            await writer.drain()
+                await writer.drain()
+
+        except Exception as e:
+            print("Unexpected error:", e)
+            await shutdown()
 
     await writer.drain()
     writer.close()
