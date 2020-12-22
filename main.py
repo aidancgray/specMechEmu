@@ -381,11 +381,11 @@ async def process_command(writer, msg):
 # parses the message to check if command is valid
 async def check_data(msg):
     verb = msg[0]
-    errorResp = "$S2ERR*24\r\n"
+    errorResp = "$S2ERR*24\r\n\r\n>"
 
     if specMech.rebooted:
         if msg != '!\r' and msg != '!\r\n':
-            return "\r\n!"
+            return "!\r\n"
         else:
             return ''
 
@@ -444,6 +444,7 @@ async def handle_data(reader, writer):
 
             if message[:-2] == 'q':
                 dataLoop = False
+                writer.write('~\r\n>'.encode())
 
             elif len(message) == 0 or message[:-2] == '':
                 check = '$S2ERR*24\r\n\r\n>'
@@ -456,13 +457,14 @@ async def handle_data(reader, writer):
                 print(f"Check: {check!r}")
                 writer.write(check.encode())
 
-                asyncio.create_task(process_command(writer, message))
+                if '$S2ERR*24' not in check:
+                    asyncio.create_task(process_command(writer, message))
 
                 await writer.drain()
 
-        except Exception as e:
+        except Exception as e2:
             time.sleep(5)
-            print("Unexpected error:", e)
+            print("Unexpected error:", e2)
             dataLoop = False
 
         await writer.drain()
@@ -512,5 +514,5 @@ if __name__ == "__main__":
             asyncio.run(main())
     except KeyboardInterrupt:
         print('~~~Keyboard Interrupt~~~')
-    except Exception as e:
-        print(f'Unexpected Error: {e}')
+    except Exception as e1:
+        print(f'Unexpected Error: {e1}')
