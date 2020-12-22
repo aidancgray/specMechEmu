@@ -380,6 +380,7 @@ async def process_command(writer, msg):
 # parses the message to check if command is valid
 async def check_data(msg):
     verb = msg[0]
+    errorResp = "$S2ERR*24\r\n"
 
     if specMech.rebooted:
         if msg != '!\r' and msg != '!\r\n':
@@ -400,33 +401,33 @@ async def check_data(msg):
             elif msg[-1:] == '\r':
                 rem = msg[2:-1]  # Get the remainder of the message minus \r
             else:
-                return "$S2ERR*24\r\n"
+                return errorResp
 
             if verb == 'M':  # Check if verb is abs move
                 try:
                     int(rem)
 
                 except ValueError:
-                    return "$S2ERR*24\r\n"
+                    return errorResp
 
             elif verb == 'm':  # Check if verb is rel move
                 try:
                     int(rem)
 
                 except ValueError:
-                    return "$S2ERR*24\r\n"
+                    return errorResp
 
             elif verb == 's':  # Check if verb is set time
                 try:
                     time.mktime(time.strptime(rem, '%Y-%m-%dT%H:%M:%SZ'))
 
                 except ValueError:
-                    return "$S2ERR*24\r\n"
+                    return errorResp
 
         else:
-            return "$S2ERR*24\r\n"
+            return errorResp
     else:
-        return "$S2ERR*24\r\n"
+        return errorResp
 
     return ''
 
@@ -441,6 +442,13 @@ async def handle_data(reader, writer):
 
         if message[:-2] == 'q':
             dataLoop = False
+
+        elif len(message) == 0:
+            check = '$S2ERR*24\r\n\r\n>'
+            print(f'Check: {check!r}')
+            writer.write(check.encode())
+            await writer.drain()
+
         else:
             check = await check_data(message)
             print(f"Check: {check!r}")
