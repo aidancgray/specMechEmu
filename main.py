@@ -445,7 +445,7 @@ async def handle_data(reader, writer):
             if message[:-2] == 'q':
                 dataLoop = False
 
-            elif len(message) == 0:
+            elif len(message) == 0 or message[:-2] == '':
                 check = '$S2ERR*24\r\n\r\n>'
                 print(f'Check: {check!r}')
                 writer.write(check.encode())
@@ -461,12 +461,14 @@ async def handle_data(reader, writer):
                 await writer.drain()
 
         except Exception as e:
+            time.sleep(5)
             print("Unexpected error:", e)
-            await shutdown()
+            dataLoop = False
+
+        await writer.drain()
 
     await writer.drain()
     writer.close()
-    await shutdown()
 
 
 async def main():
@@ -476,8 +478,7 @@ async def main():
     print(f"Serving on {addr}")
 
     async with server:
-        with suppress(asyncio.CancelledError):
-            await server.serve_forever()
+        await server.serve_forever()
 
 
 if __name__ == "__main__":
@@ -507,6 +508,9 @@ if __name__ == "__main__":
     airPress = Pressure('p', 1)
 
     try:
-        asyncio.run(main())
+        with suppress(asyncio.CancelledError):
+            asyncio.run(main())
     except KeyboardInterrupt:
         print('~~~Keyboard Interrupt~~~')
+    except Exception as e:
+        print(f'Unexpected Error: {e}')
