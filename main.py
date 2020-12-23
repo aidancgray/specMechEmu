@@ -446,7 +446,7 @@ async def handle_data(reader, writer):
                 dataLoop = False
                 writer.write('~\r\n>'.encode())
 
-            elif len(message) == 0 or message[:-2] == '':
+            elif len(message) == 0 or message == '\r' or message == '\r\n':
                 check = '$S2ERR*24\r\n\r\n>'
                 print(f'Check: {check!r}')
                 writer.write(check.encode())
