@@ -485,9 +485,9 @@ async def main():
 
 if __name__ == "__main__":
     specMech = SpecMech('specMech',
-                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.localtime()),
+                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                         0,
-                        '2020-12-16')
+                        '2021-01-13')
 
     shutter = Door('s', 'c')
     leftHart = Door('l', 'c')
