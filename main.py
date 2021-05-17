@@ -61,9 +61,9 @@ class SpecMech:
     def wait(tim):
         try:
             waitTime = int(tim)
+            time.sleep(waitTime)
         except ValueError:
             pass
-        time.sleep(waitTime)
 
 
 # For the Shutter and Hartmann Doors
